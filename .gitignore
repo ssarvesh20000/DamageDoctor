@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/
+
+# Mac
+.DS_Store
+
+# Data (DO NOT COMMIT RAW OR PROCESSED IMAGES)
+data/raw/
+data/processed/
+
+# Models (optional: ignore large checkpoints)
+models/*.pt
+models/*.pth
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Misc
+*.log
