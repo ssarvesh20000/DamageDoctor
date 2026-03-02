@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageFilter
 class RandomGlare:
     """Simulates specular highlights and windshield glare on car surfaces."""
 
-    def __init__(self, p=0.5, max_spots=3):
+    def __init__(self, p=0.7, max_spots=5):
         self.p = p
         self.max_spots = max_spots
 
@@ -32,12 +32,12 @@ class RandomGlare:
             cy = random.randint(0, h)
             rx = random.randint(w // 8, w // 2)
             ry = random.randint(h // 8, h // 2)
-            brightness = random.randint(210, 255)
-            alpha = random.randint(80, 200)
+            brightness = random.randint(230, 255)
+            alpha = random.randint(140, 245)
             draw.ellipse([cx - rx, cy - ry, cx + rx, cy + ry],
                          fill=(brightness, brightness, brightness, alpha))
 
-        overlay = overlay.filter(ImageFilter.GaussianBlur(radius=random.randint(10, 30)))
+        overlay = overlay.filter(ImageFilter.GaussianBlur(radius=random.randint(8, 25)))
         return Image.alpha_composite(img, overlay).convert("RGB")
 
 def get_device():
@@ -73,7 +73,7 @@ def eval_loop(model, loader, dev, criterion):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", type=Path, default=Path("data/processed"))
-    ap.add_argument("--epochs", type=int, default=10)
+    ap.add_argument("--epochs", type=int, default=25)
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--img", type=int, default=224)
@@ -88,7 +88,7 @@ def main():
         transforms.RandomHorizontalFlip(0.5),
         transforms.ColorJitter(0.15, 0.15, 0.10, 0.02),
         transforms.RandomRotation(10),
-        RandomGlare(p=0.5, max_spots=3),
+        RandomGlare(p=0.7, max_spots=5),
         transforms.ToTensor(),
         transforms.Normalize([0.485,0.456,0.406], [0.229,0.224,0.225]),
     ])
@@ -110,6 +110,7 @@ def main():
     model = build_model().to(dev)
     criterion = nn.BCEWithLogitsLoss()
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-6)
 
     best_val_acc = -1.0
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -138,7 +139,8 @@ def main():
         tr_acc  = correct / total
         val_loss, val_acc = eval_loop(model, val_loader, dev, criterion)
 
-        print(f"train loss={tr_loss:.4f} acc={tr_acc:.4f} | val loss={val_loss:.4f} acc={val_acc:.4f}")
+        scheduler.step()
+        print(f"train loss={tr_loss:.4f} acc={tr_acc:.4f} | val loss={val_loss:.4f} acc={val_acc:.4f} | lr={scheduler.get_last_lr()[0]:.2e}")
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
