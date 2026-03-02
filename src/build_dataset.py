@@ -54,6 +54,7 @@ def main():
         "clean_cars":       args.raw_dir / "clean_cars",
         "clean_cars_extra": args.raw_dir / "clean_cars_extra",
         "cars_dataset_2":   args.raw_dir / "external_datasets" / "cars_dataset_2",
+        "harder_negatives": args.raw_dir / "harder_negatives",
     }
     damage_source = args.raw_dir / "cardd_damage"
 

@@ -1,4 +1,5 @@
 import argparse
+import random
 from pathlib import Path
 import numpy as np
 import torch
@@ -6,6 +7,38 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms, models
 from tqdm import tqdm
+from PIL import Image, ImageDraw, ImageFilter
+
+
+class RandomGlare:
+    """Simulates specular highlights and windshield glare on car surfaces."""
+
+    def __init__(self, p=0.5, max_spots=3):
+        self.p = p
+        self.max_spots = max_spots
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        if random.random() > self.p:
+            return img
+
+        img = img.convert("RGBA")
+        w, h = img.size
+
+        overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+
+        for _ in range(random.randint(1, self.max_spots)):
+            cx = random.randint(0, w)
+            cy = random.randint(0, h)
+            rx = random.randint(w // 8, w // 2)
+            ry = random.randint(h // 8, h // 2)
+            brightness = random.randint(210, 255)
+            alpha = random.randint(80, 200)
+            draw.ellipse([cx - rx, cy - ry, cx + rx, cy + ry],
+                         fill=(brightness, brightness, brightness, alpha))
+
+        overlay = overlay.filter(ImageFilter.GaussianBlur(radius=random.randint(10, 30)))
+        return Image.alpha_composite(img, overlay).convert("RGB")
 
 def get_device():
     if torch.backends.mps.is_available():
@@ -55,6 +88,7 @@ def main():
         transforms.RandomHorizontalFlip(0.5),
         transforms.ColorJitter(0.15, 0.15, 0.10, 0.02),
         transforms.RandomRotation(10),
+        RandomGlare(p=0.5, max_spots=3),
         transforms.ToTensor(),
         transforms.Normalize([0.485,0.456,0.406], [0.229,0.224,0.225]),
     ])
