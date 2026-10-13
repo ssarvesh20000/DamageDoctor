@@ -9,6 +9,8 @@ from torchvision import datasets, transforms, models
 from tqdm import tqdm
 from PIL import Image, ImageDraw, ImageFilter
 
+from paths import CLASSIFIER_CKPT
+
 
 class RandomGlare:
     """Simulates specular highlights and windshield glare on car surfaces."""
@@ -77,7 +79,7 @@ def main():
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--img", type=int, default=224)
-    ap.add_argument("--out", type=Path, default=Path("models/binary_mobilenetv3_best.pt"))
+    ap.add_argument("--out", type=Path, default=CLASSIFIER_CKPT)
     args = ap.parse_args()
 
     dev = get_device()

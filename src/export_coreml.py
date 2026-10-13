@@ -17,6 +17,9 @@ import torch
 import torch.nn as nn
 from torchvision import models
 
+from paths import (CLASS_NAMES, CLASSIFIER_CKPT, CLASSIFIER_COREML,
+                   DETECTOR_CKPT, DETECTOR_COREML)
+
 
 class NormalizedClassifier(nn.Module):
     """Wraps the classifier with built-in ImageNet normalization.
@@ -95,7 +98,7 @@ def export_classifier(ckpt_path: Path, out_path: Path):
 
 # --- YOLOv8 detector export ---
 
-def export_detector(ckpt_path: Path, out_dir: Path):
+def export_detector(ckpt_path: Path, dest: Path):
     print(f"\n=== Exporting YOLOv8 detector ===")
     print(f"  Checkpoint: {ckpt_path}")
 
@@ -110,8 +113,6 @@ def export_detector(ckpt_path: Path, out_dir: Path):
 
     # Ultralytics saves the .mlpackage next to the .pt file
     exported = ckpt_path.with_suffix(".mlpackage")
-    dest = out_dir / "DamageDetector.mlpackage"
-
     if exported.exists():
         # Move to models/ directory
         if dest.exists():
@@ -124,29 +125,27 @@ def export_detector(ckpt_path: Path, out_dir: Path):
 
     print(f"  Input: 640x640 RGB image")
     print(f"  Output: bounding boxes with class labels")
-    print(f"  Classes: dent, scratch, crack, glass shatter, lamp broken, tire flat")
+    print(f"  Classes: {', '.join(CLASS_NAMES.values())}")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--classifier", action="store_true", help="Export classifier only")
     ap.add_argument("--detector", action="store_true", help="Export detector only")
-    ap.add_argument("--classifier-ckpt", type=Path,
-                    default=Path("models/binary_mobilenetv3_best.pt"))
-    ap.add_argument("--detector-ckpt", type=Path,
-                    default=Path("runs/kaggle_cardd_v7_detect/best.pt"))
+    ap.add_argument("--classifier-ckpt", type=Path, default=CLASSIFIER_CKPT)
+    ap.add_argument("--detector-ckpt", type=Path, default=DETECTOR_CKPT)
     args = ap.parse_args()
 
-    out_dir = Path("models")
-    out_dir.mkdir(exist_ok=True)
+    CLASSIFIER_COREML.parent.mkdir(exist_ok=True)
+    DETECTOR_COREML.parent.mkdir(exist_ok=True)
 
     export_both = not args.classifier and not args.detector
 
     if args.classifier or export_both:
-        export_classifier(args.classifier_ckpt, out_dir / "DamageClassifier.mlpackage")
+        export_classifier(args.classifier_ckpt, CLASSIFIER_COREML)
 
     if args.detector or export_both:
-        export_detector(args.detector_ckpt, out_dir)
+        export_detector(args.detector_ckpt, DETECTOR_COREML)
 
     print("\n✓ Export complete. Add .mlpackage files to your Xcode project.")
 

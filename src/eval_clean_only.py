@@ -6,6 +6,8 @@ from torchvision import transforms, models
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 
+from paths import CLASSIFIER_CKPT
+
 def get_device():
     if torch.backends.mps.is_available():
         return torch.device("mps")
@@ -22,7 +24,7 @@ def build_model():
 @torch.no_grad()
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", type=Path, default=Path("models/binary_mobilenetv3_best.pt"))
+    ap.add_argument("--ckpt", type=Path, default=CLASSIFIER_CKPT)
     ap.add_argument("--data_dir", type=Path, required=True)  # points to .../test/no_damage parent
     ap.add_argument("--threshold", type=float, default=0.5)
     args = ap.parse_args()

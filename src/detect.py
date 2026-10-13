@@ -12,13 +12,14 @@ from pathlib import Path
 
 from ultralytics import YOLO
 
-DEFAULT_CKPT = Path("runs/detect/runs/detect/cardd_v1/weights/best.pt")
+from paths import DETECTOR_CKPT
 
 
 def main():
     ap = argparse.ArgumentParser(description="Detect car damage in images")
     ap.add_argument("source", nargs="+", help="Image path(s) or directory")
-    ap.add_argument("--ckpt", type=Path, default=DEFAULT_CKPT)
+    ap.add_argument("--ckpt", type=Path, default=DETECTOR_CKPT,
+                    help="Detector weights (default: v7)")
     ap.add_argument("--conf", type=float, default=0.25, help="Confidence threshold")
     ap.add_argument("--out", type=Path, default=Path("runs/detect/inference"),
                     help="Output directory for annotated images")
@@ -29,8 +30,10 @@ def main():
 
     model = YOLO(str(args.ckpt))
 
+    # ultralytics accepts a directory only as a single source, not inside a list
+    sources = [str(s) for s in args.source]
     results = model.predict(
-        source=[str(s) for s in args.source],
+        source=sources[0] if len(sources) == 1 else sources,
         conf=args.conf,
         imgsz=640,
         device="mps",

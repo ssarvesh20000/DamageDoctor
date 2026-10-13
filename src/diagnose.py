@@ -15,6 +15,8 @@ import torch
 from torchvision import models, transforms
 from PIL import Image
 
+from paths import CLASSIFIER_CKPT, DETECTOR_CKPT
+
 
 def load_classifier(ckpt_path):
     m = models.mobilenet_v3_small(weights=None)
@@ -32,9 +34,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("images", nargs="+", help="Image paths to test")
     ap.add_argument("--classifier-ckpt", type=Path,
-                    default=Path("models/binary_mobilenetv3_best.pt"))
+                    default=CLASSIFIER_CKPT)
     ap.add_argument("--detector-ckpt", type=Path,
-                    default=Path("runs/detect/runs/detect/cardd_v1/weights/best.pt"))
+                    default=DETECTOR_CKPT,
+                    help="Detector weights (default: v7)")
     args = ap.parse_args()
 
     # --- Classifier ---

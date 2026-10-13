@@ -24,8 +24,7 @@ import numpy as np
 from tidecv import TIDE, datasets
 from ultralytics import YOLO
 
-CLASS_NAMES = {0: "dent", 1: "scratch", 2: "crack",
-               3: "glass shatter", 4: "lamp broken", 5: "tire flat"}
+from paths import CLASS_NAMES, DETECTOR_CKPT
 
 
 def yolo_to_coco_gt(img_dir: Path, label_dir: Path) -> dict:
@@ -109,7 +108,7 @@ def run_predictions(model: YOLO, img_dir: Path, imgsz: int) -> list:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", type=Path,
-                    default=Path("runs/kaggle_cardd_v7_detect/best.pt"))
+                    default=DETECTOR_CKPT)
     ap.add_argument("--split", default="val", choices=["val", "test"])
     ap.add_argument("--imgsz", type=int, default=640)
     args = ap.parse_args()

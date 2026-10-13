@@ -12,13 +12,16 @@ from pathlib import Path
 
 from ultralytics import YOLO
 
+from paths import DETECTOR_CKPT
+
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--ckpt",
         type=Path,
-        default=Path("runs/detect/runs/detect/cardd_v1/weights/best.pt"),
+        default=DETECTOR_CKPT,
+        help="Detector weights (default: v7)",
     )
     ap.add_argument(
         "--data",
