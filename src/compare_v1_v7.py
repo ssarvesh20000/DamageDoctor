@@ -12,6 +12,7 @@ Outputs:
 Usage:
   python src/compare_v1_v7.py
 """
+import argparse
 import csv
 from collections import defaultdict
 from pathlib import Path
@@ -20,15 +21,15 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-# --- Config ---
-CLASS_NAMES = {0: "dent", 1: "scratch", 2: "crack",
-               3: "glass shatter", 4: "lamp broken", 5: "tire flat"}
+from paths import (CLASS_NAMES, DETECTOR_CKPT, DETECTOR_COREML,
+                   DETECTOR_V1_CKPT, DETECTOR_V1_COREML)
 
+# --- Config ---
 MODELS = {
-    "v1_pt": Path("runs/detect/runs/detect/cardd_v1/weights/best.pt"),
-    "v7_pt": Path("runs/kaggle_cardd_v7_detect/best.pt"),
-    "v1_coreml": Path("models/DamageDetector_v1.mlpackage"),
-    "v7_coreml": Path("models/DamageDetector.mlpackage"),
+    "v1_pt": DETECTOR_V1_CKPT,
+    "v7_pt": DETECTOR_CKPT,
+    "v1_coreml": DETECTOR_V1_COREML,
+    "v7_coreml": DETECTOR_COREML,
 }
 
 FP_DIR = Path("data/raw/harder_negatives")
@@ -288,6 +289,10 @@ def coreml_drift_check(pt_preds: list, coreml_preds: list, label: str):
 
 
 def main():
+    ap = argparse.ArgumentParser(
+        description="Compare v1 vs v7 detector: FP rate, test recall, CoreML drift")
+    ap.parse_args()
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # --- Load models ---

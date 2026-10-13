@@ -4,10 +4,13 @@ Drop in a photo → see classifier result + detector boxes.
 
 Usage:
   python src/demo.py
-  # Opens browser at http://localhost:5000
+  python src/demo.py --detector-ckpt runs/detect/runs/detect/cardd_v1/weights/best.pt
+  # Opens browser at http://localhost:8080
 """
+import argparse
 import io
 import base64
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -17,28 +20,37 @@ from ultralytics import YOLO
 from PIL import Image, ImageDraw
 from flask import Flask, request, render_template_string
 
-# --- Load models once at startup ---
+from paths import CLASSIFIER_CKPT, DETECTOR_CKPT
 
-CLASSIFIER_CKPT = "models/binary_mobilenetv3_best.pt"
-DETECTOR_CKPT = "runs/detect/runs/detect/cardd_v1/weights/best.pt"
+# --- Models (loaded once in main() via load_models) ---
 
-_clf = models.mobilenet_v3_small(weights=None)
-_in_f = _clf.classifier[-1].in_features
-_clf.classifier[-1] = nn.Linear(_in_f, 1)
-_ck = torch.load(CLASSIFIER_CKPT, map_location="cpu", weights_only=False)
-_clf.load_state_dict(_ck["model"])
-_clf.eval()
+_clf = None
+_detector = None
+IMG_SIZE = 224
+CLF_TRANSFORM = None
 
-IMG_SIZE = _ck.get("img_size", 224)
 
-CLF_TRANSFORM = transforms.Compose([
-    transforms.Resize(int(IMG_SIZE * 1.15)),
-    transforms.CenterCrop(IMG_SIZE),
-    transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-])
+def load_models(classifier_ckpt: Path, detector_ckpt: Path):
+    global _clf, _detector, IMG_SIZE, CLF_TRANSFORM
 
-_detector = YOLO(DETECTOR_CKPT)
+    _clf = models.mobilenet_v3_small(weights=None)
+    in_f = _clf.classifier[-1].in_features
+    _clf.classifier[-1] = nn.Linear(in_f, 1)
+    ck = torch.load(classifier_ckpt, map_location="cpu", weights_only=False)
+    _clf.load_state_dict(ck["model"])
+    _clf.eval()
+
+    IMG_SIZE = ck.get("img_size", 224)
+
+    CLF_TRANSFORM = transforms.Compose([
+        transforms.Resize(int(IMG_SIZE * 1.15)),
+        transforms.CenterCrop(IMG_SIZE),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ])
+
+    _detector = YOLO(str(detector_ckpt))
+
 
 COLORS = {
     "dent": "#FF4444",
@@ -208,7 +220,18 @@ def analyze():
     return result
 
 
-if __name__ == "__main__":
+def main():
+    ap = argparse.ArgumentParser(description="DamageDoctor web demo")
+    ap.add_argument("--classifier-ckpt", type=Path, default=CLASSIFIER_CKPT)
+    ap.add_argument("--detector-ckpt", type=Path, default=DETECTOR_CKPT,
+                    help="Detector weights (default: v7)")
+    ap.add_argument("--port", type=int, default=8080)
+    args = ap.parse_args()
+
+    print(f"Classifier: {args.classifier_ckpt}")
+    print(f"Detector:   {args.detector_ckpt}")
+    load_models(args.classifier_ckpt, args.detector_ckpt)
+
     # Warmup both models so first request isn't slow
     print("Warming up models...")
     dummy = torch.rand(1, 3, IMG_SIZE, IMG_SIZE)
@@ -217,5 +240,9 @@ if __name__ == "__main__":
     _detector.predict(source=np.zeros((640, 640, 3), dtype=np.uint8), verbose=False)
     print("Ready.")
 
-    print("\n  Open http://localhost:8080 in your browser\n")
-    app.run(host="0.0.0.0", port=8080, debug=False)
+    print(f"\n  Open http://localhost:{args.port} in your browser\n")
+    app.run(host="0.0.0.0", port=args.port, debug=False)
+
+
+if __name__ == "__main__":
+    main()
