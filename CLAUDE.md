@@ -109,8 +109,9 @@ Which images each model has trained on (matters for any FP evaluation):
 - Preprocessing it was trained with: `Resize(int(224*1.15))` + `CenterCrop(224)` + ImageNet normalization (baked into the CoreML export).
 
 ### Detector (v7) — CarDD + 200 Background Images — PRODUCTION
-- **mAP50: 0.754 test / 0.749 val**
+- **mAP50: 0.754 test / 0.749 val**; mAP50-95 0.589 (val)
 - Per-class AP50 (test): dent 0.642, scratch 0.627, crack 0.463, glass shatter 0.991, lamp broken 0.868, tire flat 0.932
+- Per-class AP50 (val): dent 0.599, scratch 0.567, crack 0.459, glass shatter 0.988, lamp broken 0.906, tire flat 0.975
 - Weak classes: crack, scratch, dent
 - Weights: `runs/kaggle_cardd_v7_detect/best.pt`; CoreML: `models/DamageDetector.mlpackage` (done, in the DD-ios app)
 - CoreML export (`ultralytics export format=coreml nms=True`) has NMS built in: conf 0.25, IoU 0.7, per-class. Class scores are padded 6 → 80 before NMS (labels "6"–"79" are placeholders).
@@ -119,7 +120,7 @@ Which images each model has trained on (matters for any FP evaluation):
 - TIDE (v1): Loc=6.34 dAP (dominant), Bkg=4.43, Cls=1.22 — weak classes are label-limited, not model-limited. TIDE not yet run on v7.
 
 ### Detector (v1) — Previous Baseline (Superseded by v7)
-- mAP50: 0.734
+- mAP50: 0.734, mAP50-95: 0.581
 - Weights: `runs/detect/runs/detect/cardd_v1/weights/best.pt`
 - Training config: `runs/detect/runs/detect/cardd_v1/args.yaml`
 
@@ -138,6 +139,7 @@ Lesson: five hyperparameter experiments all failed. The first data-side experime
 ### Kaggle Training Workflow
 - `kaggle/` directory has a working Makefile-driven workflow for Kaggle's free P100 GPU
 - Key gotcha: must downgrade torch to 2.5.1+cu121 for P100 sm_60 compatibility
+- Gotcha: `kernel-metadata.json` attaches the LATEST version of `damagedoctor-cardd-yolo`. v7 trained on v2 (200 bg), but v8 uploaded v3 (280 bg), so re-pushing an old kernel does not reproduce its data. Check the `train: N images, M labels, K background` line in the kernel log.
 
 ## iOS App (DD-ios) — current state
 - Runs only the v7 detector (`DD-iOS/DD-iOS/ViewModels/DamageDetectionViewModel.swift`).
