@@ -2,11 +2,20 @@
 Rebuilds data/processed/ from all raw sources and creates data/eval_by_source/
 for per-source false positive evaluation.
 
+eval_by_source/<source>/ holds only that source's images that landed in the
+classifier's TEST split, so per-source FP rates are measured on held-out
+images. Pass --eval_all_images for the old behavior (every image of the
+source, including train/val images — optimistic FP rates).
+
+Note: these images are held out from the binary classifier only. All 165
+harder_negatives (and 35 clean_cars) were v7 DETECTOR training backgrounds.
+
 Usage (from project root):
     python src/build_dataset.py
     python src/build_dataset.py --seed 42 --val_frac 0.1 --test_frac 0.1
+    python src/build_dataset.py --eval_all_images
 
-WARNING: clears data/processed/ before rebuilding.
+WARNING: clears data/processed/ and data/eval_by_source/ before rebuilding.
 """
 
 import argparse
@@ -47,6 +56,9 @@ def main():
     ap.add_argument("--val_frac",  type=float, default=0.1)
     ap.add_argument("--test_frac", type=float, default=0.1)
     ap.add_argument("--seed",      type=int,   default=42)
+    ap.add_argument("--eval_all_images", action="store_true",
+                    help="Old behavior: copy EVERY image of each source into "
+                         "eval_by_source/, including train/val images (biased)")
     args = ap.parse_args()
 
     # ── Gather raw images ────────────────────────────────────────────────────
@@ -60,15 +72,22 @@ def main():
 
     print("=== Raw image counts ===")
     all_no_damage: list[Path] = []
+    source_of: dict[Path, str] = {}  # image path -> source name (read-only lookup)
     for name, folder in no_damage_sources.items():
         imgs = collect_images(folder)
         print(f"  no_damage / {name}: {len(imgs)}")
         all_no_damage.extend(imgs)
+        for img in imgs:
+            source_of[img] = name
 
     all_damage = collect_images(damage_source)
     print(f"  damage    / cardd_damage: {len(all_damage)}")
 
     # ── Balance classes ──────────────────────────────────────────────────────
+    # DO NOT change the order of operations from here through the split
+    # (list order, seed, shuffles, truncation). The current classifier's test
+    # numbers depend on this exact split. Source tracking above is a separate
+    # dict lookup and does not touch the lists being shuffled.
     n = min(len(all_no_damage), len(all_damage))
     print(f"\nBalancing at {n} images per class")
     rng = random.Random(args.seed)
@@ -105,19 +124,36 @@ def main():
         print(f"\nClearing {args.eval_dir} ...")
         shutil.rmtree(args.eval_dir)
 
-    print("Building eval_by_source/ ...")
-    for name, folder in no_damage_sources.items():
-        imgs = collect_images(folder)
+    if args.eval_all_images:
+        print("\nWARNING: --eval_all_images copies every image of each source, "
+              "including the ones in the classifier's train/val splits.")
+        print("WARNING: per-source FP rates from this eval set are optimistic "
+              "(the model has seen most of these images).")
+        print("Building eval_by_source/ (ALL images) ...")
+        eval_imgs = {name: collect_images(folder)
+                     for name, folder in no_damage_sources.items()}
+    else:
+        print("\nBuilding eval_by_source/ (test-split images only) ...")
+        eval_imgs = {name: [] for name in no_damage_sources}
+        for img in nd_test:
+            eval_imgs[source_of[img]].append(img)
+
+    for name, imgs in eval_imgs.items():
+        if not imgs:
+            # ImageFolder fails on an empty class dir, so skip the source
+            print(f"  {name}: 0 images (skipped)")
+            continue
         dest = args.eval_dir / name / "no_damage"
         dest.mkdir(parents=True, exist_ok=True)
-        for src in imgs:
+        for src in sorted(imgs):
             shutil.copy2(src, dest / src.name)
         print(f"  {name}: {len(imgs)} images")
 
     print(f"Done → {args.eval_dir}")
     print("\nTo evaluate false positive rate per source:")
-    for name in no_damage_sources:
-        print(f"  python src/eval_clean_only.py --data_dir {args.eval_dir}/{name}")
+    for name, imgs in eval_imgs.items():
+        if imgs:
+            print(f"  python src/eval_clean_only.py --data_dir {args.eval_dir}/{name}")
 
 
 if __name__ == "__main__":

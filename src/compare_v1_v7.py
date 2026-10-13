@@ -5,12 +5,17 @@ Runs both PyTorch and CoreML models, checks for prediction drift.
 
 Outputs:
   1. Summary table: FP counts at 0.25/0.5/0.7, mean FP conf, test recall @0.5
-  2. Per-class FP breakdown on harder_negatives
+  2. Per-class FP breakdown on the clean-car FP set (--fp_dir)
   3. Side-by-side PNGs for disagreement cases (conf >= 0.5)
   4. CoreML vs PyTorch drift report
 
+WARNING: the default --fp_dir (data/raw/harder_negatives) is biased in v7's
+favor — all 165 harder_negatives were v7 training background images. Use a
+directory of clean cars that v7 never trained on for a fair comparison.
+
 Usage:
   python src/compare_v1_v7.py
+  python src/compare_v1_v7.py --fp_dir data/eval_by_source/cars_dataset_2/no_damage
 """
 import argparse
 import csv
@@ -32,7 +37,7 @@ MODELS = {
     "v7_coreml": DETECTOR_COREML,
 }
 
-FP_DIR = Path("data/raw/harder_negatives")
+FP_DIR = Path("data/raw/harder_negatives")  # default --fp_dir (biased, see docstring)
 TEST_IMG_DIR = Path("data/cardd_yolo/test/images")
 TEST_LBL_DIR = Path("data/cardd_yolo/test/labels")
 OUT_DIR = Path("runs/compare_v1_v7")
@@ -42,14 +47,33 @@ IMGSZ = 640
 THRESHOLDS = [0.25, 0.5, 0.7]
 
 
-def run_inference(model: YOLO, img_dir: Path, device: str = "mps") -> list:
-    """Run model on all images at low conf. Returns list of dicts."""
-    rows = []
-    img_paths = sorted(
+def list_images(img_dir: Path) -> list:
+    """Images directly inside img_dir (not recursive)."""
+    return sorted(
         p for p in img_dir.glob("*.*")
         if p.suffix.lower() in (".jpg", ".jpeg", ".png")
     )
-    for img_path in img_paths:
+
+
+def warn_if_trained_on(fp_dir: Path) -> bool:
+    """v7 trained on every harder_negatives image as a background image.
+    Prints a warning and returns True if fp_dir is (inside) a harder_negatives dir."""
+    if "harder_negatives" not in fp_dir.resolve().parts:
+        return False
+    print("\n" + "!" * 70)
+    print(f"  WARNING: --fp_dir {fp_dir} contains harder_negatives images.")
+    print("  All 165 harder_negatives were v7 TRAINING background images, so v7")
+    print("  has seen them and v1 has not. The FP comparison below is biased in")
+    print("  v7's favor. Use clean cars v7 never trained on, e.g.")
+    print("    --fp_dir data/eval_by_source/cars_dataset_2/no_damage")
+    print("!" * 70)
+    return True
+
+
+def run_inference(model: YOLO, img_dir: Path, device: str = "mps") -> list:
+    """Run model on all images at low conf. Returns list of dicts."""
+    rows = []
+    for img_path in list_images(img_dir):
         results = model.predict(
             source=str(img_path), imgsz=IMGSZ, device=device,
             conf=CONF_LOW, iou=0.6, verbose=False,
@@ -291,7 +315,17 @@ def coreml_drift_check(pt_preds: list, coreml_preds: list, label: str):
 def main():
     ap = argparse.ArgumentParser(
         description="Compare v1 vs v7 detector: FP rate, test recall, CoreML drift")
-    ap.parse_args()
+    ap.add_argument("--fp_dir", type=Path, default=FP_DIR,
+                    help="Directory of clean-car images (every detection is a FP). "
+                         f"Default {FP_DIR} is biased: v7 trained on these images.")
+    args = ap.parse_args()
+    fp_dir = args.fp_dir
+
+    fp_imgs = list_images(fp_dir)
+    if not fp_imgs:
+        raise SystemExit(f"No .jpg/.jpeg/.png images directly inside {fp_dir} "
+                         "(for eval_by_source dirs, point at the no_damage/ subfolder)")
+    fp_biased = warn_if_trained_on(fp_dir)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -300,20 +334,19 @@ def main():
     v1_pt = YOLO(str(MODELS["v1_pt"]))
     v7_pt = YOLO(str(MODELS["v7_pt"]))
 
-    # --- Part 1: FP analysis on harder_negatives ---
+    # --- Part 1: FP analysis on clean cars ---
     print(f"\n{'='*70}")
-    print("PART 1: FALSE POSITIVES ON HARDER_NEGATIVES (clean cars)")
+    print(f"PART 1: FALSE POSITIVES ON {fp_dir} (clean cars)")
     print(f"{'='*70}")
 
-    n_imgs = len(list(FP_DIR.glob("*.jpeg"))) + len(list(FP_DIR.glob("*.jpg")))
-    print(f"  {n_imgs} images (all clean — every detection is a false positive)\n")
+    print(f"  {len(fp_imgs)} images (all clean — every detection is a false positive)\n")
 
     print("  Running v1 inference...")
-    v1_fp = run_inference(v1_pt, FP_DIR)
+    v1_fp = run_inference(v1_pt, fp_dir)
     print(f"    {len(v1_fp)} raw detections (conf >= {CONF_LOW})")
 
     print("  Running v7 inference...")
-    v7_fp = run_inference(v7_pt, FP_DIR)
+    v7_fp = run_inference(v7_pt, fp_dir)
     print(f"    {len(v7_fp)} raw detections (conf >= {CONF_LOW})")
 
     # Summary table
@@ -400,7 +433,7 @@ def main():
     print(f"{'='*70}")
 
     vis_dir = OUT_DIR / "disagreements"
-    n_rendered = render_disagreements(v1_fp, v7_fp, FP_DIR, vis_dir, conf_thresh=0.5)
+    n_rendered = render_disagreements(v1_fp, v7_fp, fp_dir, vis_dir, conf_thresh=0.5)
     print(f"  Rendered {n_rendered} disagreement images to {vis_dir}/")
 
     # --- Part 4: CoreML drift check ---
@@ -412,16 +445,16 @@ def main():
     v7_coreml_path = MODELS["v7_coreml"]
 
     if v1_coreml_path.exists() and v7_coreml_path.exists():
-        # Run CoreML on a subset (harder_negatives is small enough)
+        # Run CoreML on the FP set only (small enough for CPU)
         # CoreML via ultralytics must run on CPU to avoid MPS float64 error
-        print("\n  Running v1 CoreML inference on harder_negatives...")
+        print(f"\n  Running v1 CoreML inference on {fp_dir}...")
         v1_cm = YOLO(str(v1_coreml_path), task="detect")
-        v1_cm_fp = run_inference(v1_cm, FP_DIR, device="cpu")
+        v1_cm_fp = run_inference(v1_cm, fp_dir, device="cpu")
         coreml_drift_check(v1_fp, v1_cm_fp, "v1")
 
-        print("\n  Running v7 CoreML inference on harder_negatives...")
+        print(f"\n  Running v7 CoreML inference on {fp_dir}...")
         v7_cm = YOLO(str(v7_coreml_path), task="detect")
-        v7_cm_fp = run_inference(v7_cm, FP_DIR, device="cpu")
+        v7_cm_fp = run_inference(v7_cm, fp_dir, device="cpu")
         coreml_drift_check(v7_fp, v7_cm_fp, "v7")
     else:
         missing = []
@@ -440,9 +473,9 @@ def main():
         ])
         writer.writeheader()
         for row in v1_fp:
-            writer.writerow({"model": "v1", "dataset": "harder_negatives", **row})
+            writer.writerow({"model": "v1", "dataset": fp_dir.name, **row})
         for row in v7_fp:
-            writer.writerow({"model": "v7", "dataset": "harder_negatives", **row})
+            writer.writerow({"model": "v7", "dataset": fp_dir.name, **row})
         for row in v1_test:
             writer.writerow({"model": "v1", "dataset": "cardd_test", **row})
         for row in v7_test:
@@ -453,6 +486,8 @@ def main():
     print(f"\n{'='*70}")
     print("DECISION FRAMEWORK")
     print(f"{'='*70}")
+    if fp_biased:
+        print("  NOTE: FP set is v7 training data — FP comparison is biased toward v7.")
     fewer_fps = v7_stats[0.5] < v1_stats[0.5]
     holds_recall = v7_overall >= v1_overall - 0.02  # 2% tolerance
     if fewer_fps and holds_recall:
