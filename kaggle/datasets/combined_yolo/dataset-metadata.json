@@ -1,0 +1,11 @@
+{
+  "title": "DamageDoctor Combined YOLO",
+  "id": "ssarvesh20000/damagedoctor-combined-yolo",
+  "licenses": [
+    {
+      "name": "CC0-1.0"
+    }
+  ],
+  "subtitle": "Merged CarDD + VeHIDE (subsampled) in YOLO format — 6 classes",
+  "description": "Private training dataset for the DamageDoctor project. Combines CarDD (2816 train / 810 val / 374 test) with a subsampled subset of the VeHIDE Vietnamese insurance car damage dataset (~4000 additional training images). Class distribution is balanced via per-class capping at 3000 annotations. Val and test splits are CarDD-only for a stable benchmark.\n\nClasses: 0=dent, 1=scratch, 2=crack, 3=glass shatter, 4=lamp broken, 5=tire flat.\n\nRebuilt locally with `python src/convert_vehide_to_yolo.py` before upload."
+}

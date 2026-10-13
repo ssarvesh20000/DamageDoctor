@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DamageDoctor is a binary image classifier that detects visible car damage using a fine-tuned `mobilenet_v3_small` model (ImageNet pretrained). The model outputs a single logit and uses `BCEWithLogitsLoss` with a sigmoid threshold of 0.5. Classes are `damage` (index 0) and `no_damage` (index 1).
+DamageDoctor has two models:
+1. **Binary classifier** — detects whether a car photo has visible damage. MobileNetV3-Small, single logit, BCEWithLogitsLoss. Classes: `damage` (0), `no_damage` (1).
+2. **Damage detector** — localizes and classifies damage types. YOLOv8s, 6 classes: dent, scratch, crack, glass shatter, lamp broken, tire flat.
+
+Pipeline: binary classifier gates the detector (run boxes only when damage detected).
 
 ## Environment Setup
 
@@ -14,103 +18,98 @@ Uses Python 3.9 with a `.venv` in the project root.
 source .venv/bin/activate
 ```
 
-Key dependencies (no requirements.txt — installed in .venv): `torch 2.8`, `torchvision 0.23`, `numpy`, `tqdm`, `scikit-learn`.
+Key dependencies (no requirements.txt — installed in .venv): `torch 2.8`, `torchvision 0.23`, `ultralytics`, `numpy`, `tqdm`, `scikit-learn`, `flask`, `Pillow`.
 
 All scripts must be run from the **project root**, not from `src/`.
 
 ## Commands
 
-**Rebuild dataset** (run whenever new raw images are added):
+### Binary Classifier
+
 ```bash
-python src/build_dataset.py
-# Clears data/processed/ and rebuilds from all raw sources
-# Also rebuilds data/eval_by_source/ for per-source FP evaluation
+python src/build_dataset.py           # Rebuild data/processed/ from raw sources
+python src/train_binary.py            # Train (--epochs, --batch, --lr, --img, --out)
+python src/eval_test.py               # Confusion matrix + classification report
+python src/eval_clean_only.py --data_dir data/eval_by_source/harder_negatives  # FP rate
+python src/eval_no_damage_all.py      # FP rate across all splits
 ```
 
-**Train:**
+### Damage Detector
+
 ```bash
-python src/train_binary.py
-# Optional args: --data_dir, --epochs (default 25), --batch, --lr, --img, --out
+python src/eval_detect_test.py                   # Evaluate detector on test set
+python src/detect.py                             # Run inference on images
 ```
 
-**Evaluate on test set** (confusion matrix + classification report):
+### Utilities
+
 ```bash
-python src/eval_test.py
-# Optional: --ckpt, --data_dir
-```
-
-**Evaluate false positive rate on a specific source:**
-```bash
-python src/eval_clean_only.py --data_dir data/eval_by_source/harder_negatives
-python src/eval_clean_only.py --data_dir data/eval_by_source/clean_cars
-# Optional: --ckpt, --threshold
-```
-
-**Evaluate false positive rate across all splits:**
-```bash
-python src/eval_no_damage_all.py
-# Optional: --ckpt, --data_dir, --threshold
-```
-
-## Architecture
-
-**Model** (`src/train_binary.py`): `mobilenet_v3_small` with the final classifier layer replaced by `nn.Linear(in_features, 1)`. Trained with AdamW lr=3e-4, weight_decay=1e-4, CosineAnnealingLR over 25 epochs (decays to 1e-6).
-
-**Augmentation**: Train pipeline includes `RandomGlare(p=0.7, max_spots=5)` — simulates specular highlights and windshield glare using soft blurred ellipses composited onto the image. Applied only during training, not eval.
-
-**Device selection**: Auto-detects MPS (Apple Silicon) → CUDA → CPU.
-
-**Checkpoint format** (`models/binary_mobilenetv3_best.pt`):
-```python
-{"model": state_dict, "class_to_idx": {"damage": 0, "no_damage": 1}, "img_size": 224}
+python src/demo.py                    # Flask web demo (both models)
+python src/diagnose.py img1.jpg       # CLI inference (both models)
+python src/export_coreml.py           # Export binary classifier to CoreML
 ```
 
 ## Data Layout
 
 ```
 data/
-  raw/                          # source images (gitignored)
-    cardd_damage/               # 4000 damaged car images
-    clean_cars/                 # 1253 clean
-    clean_cars_extra/           # 199 clean
-    external_datasets/
-      cars_dataset_2/           # 951 clean
-    harder_negatives/           # real phone photos targeting edge cases (glare, stickers)
-  processed/                    # rebuilt by build_dataset.py — do not edit manually
-    train/val/test/
-      damage/
-      no_damage/
-  eval_by_source/               # flat per-source folders for targeted FP eval
-    clean_cars/no_damage/
-    clean_cars_extra/no_damage/
-    cars_dataset_2/no_damage/
-    harder_negatives/no_damage/
+  cardd_yolo/                       # CarDD in YOLO format (2816/810/374 train/val/test)
+    {train,val,test}/{images,labels}/
+    data.yaml
+  archive (3)/                      # VeHIDE raw download (kept as reference, not used)
+  raw/                              # Binary classifier raw images
+    cardd_damage/                   # 4000 damaged
+    clean_cars/                     # 1253 clean
+    clean_cars_extra/               # 199 clean
+    external_datasets/cars_dataset_2/  # 951 clean
+    harder_negatives/               # Phone photos (glare, stickers edge cases)
+  processed/                        # Binary classifier splits (rebuilt by build_dataset.py)
+  eval_by_source/                   # Per-source FP eval dirs
 ```
 
-To add a new no_damage source: add the folder to `data/raw/`, register it in `no_damage_sources` dict in `src/build_dataset.py`, then run `build_dataset.py` and retrain.
+## Current Model Status
 
-## Current Status & Immediate Next Step
-
-**v2 results** (25 epochs, cosine LR, RandomGlare augmentation):
+### Binary Classifier (v2) — DONE
 - Test accuracy: 99.61%, damage recall: 100%
-- harder_negatives FP rate: 1.2% (2 images with extreme glare still failing)
+- Remaining weakness: extreme specular glare (1.2% FP on harder_negatives)
+- Checkpoint: `models/binary_mobilenetv3_best.pt`
 
-**Remaining weakness:** Heavy specular glare on windshields/hoods. The model has learned to handle moderate glare but the most extreme cases (direct sunlight dead-on) still trigger false positives.
+### Detector (v7) — CarDD + 200 Background Images — PRODUCTION
+- mAP50: 0.749, mAP50-95: 0.589
+- Strong: glass shatter (0.988), tire flat (0.975), lamp broken (0.906)
+- Weak: crack (0.459), scratch (0.567), dent (0.599)
+- Weights: `runs/kaggle_cardd_v7_detect/best.pt`
+- Recipe: exact v1 config (YOLOv8s, SGD, 50ep, batch=16, default aug) + 200 background images (7% of train set)
+- Background images: 165 harder_negatives + 35 clean_cars, no label files
+- Kaggle dataset version: `ssarvesh20000/damagedoctor-cardd-yolo` v2
+- TIDE (v1): Loc=6.34 dAP (dominant), Bkg=4.43, Cls=1.22 — weak classes are label-limited, not model-limited
 
-**Next action — collect more glare photos:**
-- Direct sunlight hitting the windshield dead-on
-- Bright overhead lights reflecting off the hood or roof
-- Sun glare on side windows and mirrors
-- Any angle where glare covers a large portion of the car
+### Detector (v1) — Previous Baseline (Superseded by v7)
+- mAP50: 0.734, mAP50-95: 0.581
+- Weights: `runs/detect/runs/detect/cardd_v1/weights/best.pt`
+- Training config: `runs/detect/runs/detect/cardd_v1/args.yaml`
 
-Drop photos into `data/raw/harder_negatives/`, then:
-```bash
-python src/build_dataset.py
-python src/train_binary.py
-python src/eval_clean_only.py --data_dir data/eval_by_source/harder_negatives
-```
+### Experiment History
+Seven experiments tested; only v7 (data-side: background images) beat v1:
+- v1: YOLOv8s, 50ep, default aug → mAP50 0.734 (original baseline)
+- v3: CarDD+VeHIDE combined → 0.677 (regressed)
+- v4: YOLOv8m, heavy aug → 0.704 (regressed)
+- v5: YOLO11s-seg, 1280, copy_paste → 0.681 (regressed, but crack +0.080)
+- v6: YOLO11s, 640, conservative aug → 0.696 (regressed)
+- **v7: YOLOv8s, exact v1 recipe + 200 bg images → 0.749 (NEW BASELINE)**
+- v8: Same as v7 + 280 bg images → 0.726 (10% bg ratio too high)
 
-**After glare is solved:**
-1. Export to CoreML for iOS
-2. Test on real-world phone images in-app
-3. Move to damage localization (object detection)
+Lesson: five hyperparameter experiments all failed. First data-side experiment succeeded immediately. Remaining errors are addressable through data, not training config.
+
+### Kaggle Training Workflow
+- `kaggle/` directory has a working Makefile-driven workflow for Kaggle's free P100 GPU
+- Reusable for future training if needed
+- Key gotcha: must downgrade torch to 2.5.1+cu121 for P100 sm_60 compatibility
+
+## Immediate Next Steps
+
+1. **Export v7 detector to CoreML** — first detector CoreML export for iOS pipeline
+2. **Run TIDE on v7** — confirm Bkg error dropped, establish new error profile for next intervention
+3. **Binary classifier** — collect more extreme glare photos, retrain, export to CoreML
+4. **End-to-end pipeline** — binary classifier gates detector for iOS app
+5. **iOS app integration**

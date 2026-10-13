@@ -1,0 +1,11 @@
+{
+  "title": "DamageDoctor CarDD YOLO",
+  "id": "ssarvesh20000/damagedoctor-cardd-yolo",
+  "licenses": [
+    {
+      "name": "CC0-1.0"
+    }
+  ],
+  "subtitle": "CarDD in YOLO format — 6 damage classes",
+  "description": "Private training dataset for the DamageDoctor project. CarDD only, in YOLO format: 2816 train / 810 val / 374 test images. This is the same CarDD-only dataset used for the production v1 detector weights.\n\nClasses: 0=dent, 1=scratch, 2=crack, 3=glass shatter, 4=lamp broken, 5=tire flat.\n\nConverted locally from CarDD COCO format with `python src/convert_coco_to_yolo.py` before upload."
+}

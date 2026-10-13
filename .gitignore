@@ -10,13 +10,25 @@ venv/
 # Mac
 .DS_Store
 
-# Data (DO NOT COMMIT RAW OR PROCESSED IMAGES)
+# Data (DO NOT COMMIT IMAGES)
 data/raw/
 data/processed/
+data/eval_by_source/
+data/cardd_yolo/
+data/cardd_yolo_seg/
+data/combined_yolo/
+data/vehide_yolo/
+data/archive*/
+CarDD_release/
+25kUndmged/
 
-# Models (optional: ignore large checkpoints)
+# Models
 models/*.pt
 models/*.pth
+yolov8s.pt
+
+# YOLO training runs
+runs/
 
 # Jupyter
 .ipynb_checkpoints/

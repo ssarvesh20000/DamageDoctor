@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from torchvision import datasets, transforms, models
 from tqdm import tqdm
 from PIL import Image, ImageDraw, ImageFilter
@@ -104,7 +104,14 @@ def main():
 
     print("class_to_idx:", train_ds.class_to_idx)
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch, shuffle=True, num_workers=0)
+    targets = torch.tensor(train_ds.targets)
+    class_counts = torch.bincount(targets)
+    class_weights = 1.0 / class_counts.float()
+    sample_weights = class_weights[targets]
+    sampler = WeightedRandomSampler(sample_weights, num_samples=len(sample_weights), replacement=True)
+    print(f"class counts: {dict(enumerate(class_counts.tolist()))}")
+
+    train_loader = DataLoader(train_ds, batch_size=args.batch, sampler=sampler, num_workers=0)
     val_loader   = DataLoader(val_ds, batch_size=args.batch, shuffle=False, num_workers=0)
 
     model = build_model().to(dev)

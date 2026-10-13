@@ -1,0 +1,11 @@
+{
+  "title": "DamageDoctor CarDD YOLO Seg",
+  "id": "ssarvesh20000/damagedoctor-cardd-yolo-seg",
+  "licenses": [
+    {
+      "name": "CC0-1.0"
+    }
+  ],
+  "subtitle": "CarDD in YOLO segmentation format — polygon masks, 6 damage classes",
+  "description": "CarDD dataset in YOLO segmentation format with polygon mask labels. 2816 train / 810 val / 374 test images. 6 classes: dent, scratch, crack, glass shatter, lamp broken, tire flat. Labels have polygon coordinates (cls x1 y1 x2 y2 ... xn yn, normalized). Converted from CarDD COCO annotations."
+}
