@@ -51,13 +51,15 @@ Weights, `data/` and `runs/` are gitignored.
 ### Binary Classifier
 
 ```bash
-python src/build_dataset.py           # Rebuild data/processed/ + data/eval_by_source/ (test-split images only)
+python src/build_dataset.py --out_dir runs/rebuild/processed --eval_dir runs/rebuild/eval   # NEVER default dirs, see below
 python src/build_dataset.py --eval_all_images   # Old eval_by_source (includes train/val images — biased)
 python src/train_binary.py            # Train (--epochs, --batch, --lr, --img, --out)
 python src/eval_test.py               # Confusion matrix + classification report
 python src/eval_clean_only.py --data_dir data/eval_by_source/harder_negatives  # FP rate (held-out)
 python src/eval_no_damage_all.py      # FP rate across all splits
 ```
+
+**DANGER: `build_dataset.py` (on main) `shutil.rmtree`s `--out_dir` (default `data/processed`) and `--eval_dir` (default `data/eval_by_source`).** `data/processed` also holds 17,825 25kUndmged images that main's `build_dataset.py` does not know about, so running it with the defaults destroys the current classifier dataset. Branch `overnight2/build-dataset-25k` adds the 25kUndmged source and refuses to delete existing dirs without `--force`; a rebuild into a fresh dir reproduced `data/processed` exactly (22,961/22,961 files, same split/class/filename/md5).
 
 ### Damage Detector
 
@@ -91,19 +93,29 @@ data/
     clean_cars_extra/               # 199 clean
     external_datasets/cars_dataset_2/  # 951 clean
     harder_negatives/               # 165 phone photos (glare, stickers edge cases)
-  processed/                        # Binary classifier splits (rebuilt by build_dataset.py)
-  eval_by_source/                   # Per-source FP eval dirs: only each source's classifier TEST-split images
+  processed/                        # Classifier splits: build_dataset.py balanced part (damage_*/no_damage_*: 2054/257/257 per class)
+                                    #   + 25kUndmged copied flat with original names, its own split (10,695/1,742/5,388)
+                                    #   totals: train 2054 damage / 12749 no_damage; val 257 / 1999; test 257 / 5645
+  eval_by_source/                   # Per-source FP eval dirs (currently the OLD all-images version: includes train images)
+  manifests/                        # Text manifests (classifier_split_current.csv: split,class,filename,source,md5)
+25kUndmged/data/{train,val,test}/<~300 subfolders>/*.jpg   # 17,825 clean-car images, mostly THUMBNAILS
+                                    #   (median max side 100 px; 96% < 200 px). CarDD is ~1000 px.
 ```
 
 Which images each model has trained on (matters for any FP evaluation):
-- Classifier: everything in `processed/train` (≈80% of each no_damage source).
-- Detector v7: CarDD train + 200 background images = **all 165 `harder_negatives` + 35 `clean_cars`** (which 35 is not recorded in this repo). `clean_cars_extra` and `cars_dataset_2` were never detector training data.
+- Classifier: everything in `processed/train` (≈80% of each raw no_damage source + all 10,695 25kUndmged train images + 2054 CarDD images). 192 of the 374 CarDD **detector test** images are in the classifier's train split.
+- Detector v7: CarDD train + 200 background images = **all 165 `harder_negatives` + 35 `clean_cars`** (the 35 were recovered from file birth times in `data/cardd_yolo/train/images`: list in `data/manifests/detector_v7_backgrounds.txt` on branch `overnight2/v9-experiments`; 3 of them are in the classifier's held-out clean_cars test images). `clean_cars_extra`, `cars_dataset_2` and 25kUndmged were never detector training data.
+- Local `data/cardd_yolo/train` has 280 backgrounds (= Kaggle dataset v3, v8's data), not v7's 200.
+- 25kUndmged has 17 byte-identical duplicates across its own splits (15 train↔test, 2 train↔val).
 
 ## Current Model Status
 
 ### Binary Classifier (v2) — trained, CoreML exported, NOT used by the app
-- Test accuracy: 99.61%, damage recall: 100%
-- Per-source FP rates (clean_cars 0.1%, clean_cars_extra 1.0%, cars_dataset_2 0.9%, harder_negatives 1.2%) were measured on the old `eval_by_source/`, which included training images → **optimistic; re-measure** with the new held-out eval sets.
+Measured 2026-10-13 (overnight2) on the current `data/processed/test` (n=5902):
+- Accuracy 5896/5902 = 99.90%, damage recall 256/257 = 99.61%, no_damage FP 5/5645 = 0.09%.
+- Held-out FP by source: 25kUndmged 2/5388, clean_cars 0/124, clean_cars_extra 0/16, cars_dataset_2 2/100, harder_negatives 1/17. All 165 harder_negatives (128 were training images): 4/165 = 2.4%.
+- On the 514-image balanced part only: 510/514 = 99.22%. The old "99.61% / recall 100%" does not reproduce with this checkpoint.
+- **Resolution shortcut:** damaged CarDD test images downscaled to max side 100 px are called clean (recall 0/374 after JPEG save, 30/374 in memory; 200 px 268/374; ≥300 px 369–373/374). Its near-zero FP on 25kUndmged thumbnails is mostly "small image ⇒ no damage". The older `binary_mobilenetv3_v2.pt` (not trained on 25k) flags 944/5388 of those thumbnails as damage.
 - Remaining weakness: extreme specular glare.
 - Checkpoint: `models/binary_mobilenetv3_best.pt`; CoreML: `models/DamageClassifier.mlpackage`
 - Preprocessing it was trained with: `Resize(int(224*1.15))` + `CenterCrop(224)` + ImageNet normalization (baked into the CoreML export).
@@ -117,7 +129,17 @@ Which images each model has trained on (matters for any FP evaluation):
 - CoreML export (`ultralytics export format=coreml nms=True`) has NMS built in: conf 0.25, IoU 0.7, per-class. Class scores are padded 6 → 80 before NMS (labels "6"–"79" are placeholders).
 - Recipe: exact v1 config (YOLOv8s, SGD, 50ep, batch=16, default aug) + 200 background images (7% of train set), no label files
 - Kaggle dataset version: `ssarvesh20000/damagedoctor-cardd-yolo` v2
-- TIDE (v1): Loc=6.34 dAP (dominant), Bkg=4.43, Cls=1.22 — weak classes are label-limited, not model-limited. TIDE not yet run on v7.
+- TIDE dAP (overnight2, `src/tide_analysis.py`):
+
+  | | AP50 | Cls | Loc | Both | Dupe | Bkg | Miss |
+  |---|---|---|---|---|---|---|---|
+  | v1 val | 72.72 | 1.22 | 6.34 | 0.78 | 0.22 | 4.43 | 1.49 |
+  | v7 val | 73.60 | 0.86 | 5.80 | 0.70 | 0.16 | 4.93 | 1.77 |
+  | v1 test | 74.61 | 1.53 | 4.87 | 0.64 | 0.20 | 5.25 | 2.10 |
+  | v7 test | 74.85 | 1.54 | 5.10 | 0.60 | 0.18 | 4.29 | 3.34 |
+
+  The old "v1 baseline Loc 6.34 / Bkg 4.43 / Cls 1.22" was v1 on **val**. Loc dominates everywhere; Bkg on CarDD went down on test but up on val. Scratch errors are Loc-dominated (not Cls/Miss).
+- Image-level FP (any box ≥ 0.25) on never-seen clean images, v7 vs v1: 25kUndmged test 652/5388 (12.1%) vs 2483/5388 (46.1%); cars_dataset_2 18/100 vs 50/100; held-out clean_cars 8/121 vs 39/121. v1's 25k FPs are mostly whole-frame "glass shatter" on blurry thumbnails.
 
 ### Detector (v1) — Previous Baseline (Superseded by v7)
 - mAP50: 0.734, mAP50-95: 0.581
@@ -139,6 +161,7 @@ Lesson: five hyperparameter experiments all failed. The first data-side experime
 ### Kaggle Training Workflow
 - `kaggle/` directory has a working Makefile-driven workflow for Kaggle's free P100 GPU
 - Key gotcha: must downgrade torch to 2.5.1+cu121 for P100 sm_60 compatibility
+- Gotcha (2026-10): Kaggle's image is now Python 3.13 and torchvision 0.20.1 has no cp313 wheel, so the pip downgrade fails. The v9 E1/E2 kernels (`overnight2/v9-experiments`) create a Python 3.12 venv with `uv`, install the same pin + ultralytics 8.4.40 (v7's version) there, and re-exec.
 - Gotcha: `kernel-metadata.json` attaches the LATEST version of `damagedoctor-cardd-yolo`. v7 trained on v2 (200 bg), but v8 uploaded v3 (280 bg), so re-pushing an old kernel does not reproduce its data. Check the `train: N images, M labels, K background` line in the kernel log.
 
 ## iOS App (DD-ios) — current state
@@ -147,16 +170,17 @@ Lesson: five hyperparameter experiments all failed. The first data-side experime
 - `ios/DamageDoctorUITests/` in THIS repo is stale (tests a classifier-gate design that doesn't exist). Replacement UI tests live in DD-ios `DD-iOSUITests/`; delete the old folder once reviewed.
 
 ## Known Problems (still open)
-- **P3 — iOS preprocessing.** The app stretched photos to 640×640 (`.scaleFill`) instead of letterboxing like ultralytics, and ignored `UIImage.imageOrientation` (portrait camera photos reached the model rotated 90°). Fix: DD-ios letterbox PR — needs an Xcode build, the unit tests, and a before/after benchmark run through `compare_ios_benchmark.py`.
-- **P2 — biased FP numbers.** Both are fixed in code (`build_dataset.py` held-out eval sets, `compare_v1_v7.py --fp_dir` + warning) but the FP rates in this file and README have not been re-measured yet. The held-out `harder_negatives` set is only ~16 images, so it can't give a precise FP rate.
+- **P3 — iOS preprocessing.** The app stretched photos to 640×640 (`.scaleFill`) instead of letterboxing like ultralytics, and ignored `UIImage.imageOrientation`. Measured on the simulator (CarDD test n=374, vs Python v7): damage/no-damage agreement stretch 365/374 → letterbox 373/374, exact box-count match 178 → 271, top-label agreement 82.7% → 85.6%; recall 368/374 on both. Letterbox PR not merged yet.
+- **App confidence display.** The app shows `observation.labels.first.confidence`, which is ~0.99 for almost every box (looks normalized across the 80 padded classes); it is not the detector score.
+- **P2 — biased FP numbers.** Re-measured on held-out sets (above). The held-out `harder_negatives` set is only 17 images, so it can't give a precise FP rate.
 - **No held-out set of clean phone photos** exists for the detector: every `harder_negatives` image was a v7 training background.
 - **P4 — stale UI tests** in `ios/DamageDoctorUITests/` (see above).
 - DD-ios: the camera button crashes in the simulator (no `isSourceTypeAvailable` check); `AnalysisLogView` shows scripted fake log lines ("Found dent · 86%") during analysis.
 
 ## Immediate Next Steps
 
-1. **Decide classifier gate yes/no** after the iOS letterbox fix: run the benchmark before/after, then measure the classifier on device with the training preprocessing (Resize + CenterCrop) before calling it faulty.
-2. **Rebuild eval sets without training images and re-measure FP rates**: `python src/build_dataset.py`, then `eval_clean_only.py` per source and `compare_v1_v7.py --fp_dir <clean dir v7 never trained on>`.
-3. **Run TIDE on v7** (`python src/tide_analysis.py --split test`) — confirm the Bkg error dropped and get the new error profile.
-4. **Build a held-out set of clean phone photos** (never used for training either model) for honest FP measurement.
+1. **Decide classifier gate yes/no.** Python numbers (v7, CarDD test n=374 vs 237 non-25k held-out clean photos): detector ≥0.25 alone recall 369/374, FP 30/237; classifier gate + detector recall 368/374, FP 0/237. See `runs/overnight2/eval/PHASE3_SUMMARY.txt`. Then measure the classifier on device with the training preprocessing (Resize + CenterCrop).
+2. **Merge or reject the letterbox PR** (numbers above).
+3. **Build a held-out set of clean phone photos** (never used for training either model) for honest FP measurement — the only big held-out clean set (25kUndmged) is thumbnails.
+4. **Fix the classifier's resolution shortcut** before relying on it for small images (e.g., train with random downscaling of damaged images, or drop 25k thumbnails).
 5. **Data-side work on the weak classes** (crack / scratch / dent): relabeling, more examples — not hyperparameters.
