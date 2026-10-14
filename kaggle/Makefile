@@ -6,7 +6,12 @@
 KAGGLE      := ../.venv/bin/kaggle
 KAGGLE_USER := ssarvesh20000
 
-# --- v8 detect + 280 bg images (current) ---
+# --- v9 detect: v7 recipe + V9 DATA HOOK (prepared, not run yet) ---
+V9_KERNEL_SLUG  := $(KAGGLE_USER)/damagedoctor-train-detect-v9
+V9_KERNEL_DIR   := kernels/train_detect_v9
+V9_OUTPUT_DIR   := ../runs/kaggle_cardd_v9_detect
+
+# --- v8 detect + 280 bg images (done) ---
 V8_KERNEL_SLUG  := $(KAGGLE_USER)/damagedoctor-train-detect-v8
 V8_KERNEL_DIR   := kernels/train_detect_v8
 V8_OUTPUT_DIR   := ../runs/kaggle_cardd_v8_detect
@@ -30,6 +35,7 @@ SEG_KERNEL_DIR   := kernels/train_seg_cardd
 SEG_OUTPUT_DIR   := ../runs/kaggle_cardd_v5_seg
 
 .PHONY: help check-cli \
+        push-v9 v9-status pull-v9 \
         push-v8 v8-status pull-v8 \
         push-v7 v7-status pull-v7 \
         push-v6 v6-status pull-v6 \
@@ -44,12 +50,13 @@ help:
 	@echo "  # Place kaggle.json at ~/.kaggle/kaggle.json (chmod 600)"
 	@echo "  # Phone-verify at https://www.kaggle.com/settings to enable GPU + internet"
 	@echo ""
-	@echo "v8 detect + 280 bg images (v1 recipe, 10% background):"
-	@echo "  make push-v8        Push training script and trigger GPU run"
-	@echo "  make v8-status      Poll current training run status"
-	@echo "  make pull-v8        Download best.pt + logs"
+	@echo "v9 detect (v7 recipe + data change from a V9 overlay dataset; see kernels/train_detect_v9/train.py):"
+	@echo "  make push-v9        Push training script and trigger GPU run"
+	@echo "  make v9-status      Poll current training run status"
+	@echo "  make pull-v9        Download best.pt + logs"
 	@echo ""
 	@echo "Previous experiments (done):"
+	@echo "  v8: push-v8 / v8-status / pull-v8   (280 bg, regressed)"
 	@echo "  v7: push-v7 / v7-status / pull-v7   (200 bg, new baseline)"
 	@echo "  v6: push-v6 / v6-status / pull-v6"
 	@echo "  v5: push-seg-kernel / seg-status / pull-seg-output"
@@ -64,6 +71,24 @@ check-cli:
 		exit 1; \
 	}
 	@$(KAGGLE) kernels list --mine --page-size 1 >/dev/null && echo "OK: kaggle CLI authenticated"
+
+# --- v9 detect ---
+# Attaches the LATEST version of damagedoctor-cardd-yolo (v3 = 280 bg since v8!).
+# Check the dataset version you want before pushing; see train_detect_v9/train.py.
+push-v9: check-cli
+	$(KAGGLE) kernels push -p $(V9_KERNEL_DIR)
+	@echo ""
+	@echo "Kernel running at: https://www.kaggle.com/code/$(V9_KERNEL_SLUG)"
+
+v9-status: check-cli
+	$(KAGGLE) kernels status $(V9_KERNEL_SLUG)
+
+pull-v9: check-cli
+	@mkdir -p $(V9_OUTPUT_DIR)
+	$(KAGGLE) kernels output $(V9_KERNEL_SLUG) -p $(V9_OUTPUT_DIR)
+	@echo ""
+	@echo "Downloaded to $(V9_OUTPUT_DIR)/"
+	@ls -la $(V9_OUTPUT_DIR) || true
 
 # --- v8 detect + 280 bg images ---
 # Uses cardd-yolo dataset v3 (with 280 bg images)
