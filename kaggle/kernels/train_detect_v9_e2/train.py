@@ -45,6 +45,7 @@ v1 recipe (from args.yaml):
 Expected: background images reduce Bkg FPs (4.43 dAP in TIDE)
 without hurting strong classes. If this beats v1, it's the new baseline.
 """
+import os
 import shutil
 import subprocess
 import sys
@@ -56,18 +57,43 @@ WORK_DIR = Path("/kaggle/working")
 STAGED_DATASET = WORK_DIR / "dataset"
 
 
-def _pip_install():
+VENV_DIR = WORK_DIR / "py312"
+ULTRALYTICS_VERSION = "8.4.40"  # what v7 ran with (from its Kaggle log)
+
+
+def _bootstrap_py312():
+    """Re-run this script under a Python 3.12 venv (once).
+
+    Kaggle's image moved to Python 3.13 (2026-10), and torchvision 0.20.1 has
+    no cp313 wheel, so the torch 2.5.1+cu121 pin below can't be installed into
+    the system Python any more. v7 ran on Kaggle's Python 3.12, so a 3.12 venv
+    reproduces its environment. Training itself is unchanged.
+    """
+    if os.environ.get("DD_IN_VENV") == "1":
+        return
+    print(f"System Python {sys.version.split()[0]} -> creating Python 3.12 venv at {VENV_DIR}")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "uv"])
+    subprocess.check_call([sys.executable, "-m", "uv", "venv", "--seed",
+                           "--python", "3.12", str(VENV_DIR)])
+    py = str(VENV_DIR / "bin" / "python")
+    _pip_install(py)
+    sys.stdout.flush()
+    os.execve(py, [py, os.path.abspath(sys.argv[0])] + sys.argv[1:],
+              dict(os.environ, DD_IN_VENV="1"))
+
+
+def _pip_install(python=sys.executable):
     """Install pinned torch for P100 sm_60 compatibility."""
     print("Downgrading torch to 2.5.1+cu121 (sm_60 compatible for P100)...")
     subprocess.check_call([
-        sys.executable, "-m", "pip", "install", "--quiet",
+        python, "-m", "pip", "install", "--quiet",
         "--force-reinstall",
         "torch==2.5.1", "torchvision==0.20.1",
         "--index-url", "https://download.pytorch.org/whl/cu121",
     ])
-    print("Installing ultralytics...")
+    print(f"Installing ultralytics=={ULTRALYTICS_VERSION}...")
     subprocess.check_call([
-        sys.executable, "-m", "pip", "install", "--quiet", "ultralytics",
+        python, "-m", "pip", "install", "--quiet", f"ultralytics=={ULTRALYTICS_VERSION}",
     ])
 
 
@@ -303,8 +329,9 @@ def _print_gpu():
 
 
 def main():
-    print("=== Install torch 2.5.1 + ultralytics ===")
-    _pip_install()
+    print("=== Install torch 2.5.1 + ultralytics (Python 3.12 venv) ===")
+    _bootstrap_py312()
+    print(f"Running under Python {sys.version.split()[0]} ({sys.executable})")
 
     print("\n=== Locate dataset ===")
     source_root = _locate_dataset_root()
