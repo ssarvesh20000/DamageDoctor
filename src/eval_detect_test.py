@@ -6,6 +6,7 @@ Usage:
   python src/eval_detect_test.py
   python src/eval_detect_test.py --ckpt runs/detect/runs/detect/cardd_v2/weights/best.pt
   python src/eval_detect_test.py --save-imgs 20   # save 20 images with drawn boxes
+  python src/eval_detect_test.py --split val --project runs/overnight2/val
 """
 import argparse
 from pathlib import Path
@@ -35,6 +36,9 @@ def main():
         help="Number of test images to save with predicted boxes (0 = skip)",
     )
     ap.add_argument("--imgsz", type=int, default=640)
+    ap.add_argument("--split", default="test", choices=["val", "test"])
+    ap.add_argument("--project", type=Path, default=None,
+                    help="Where ultralytics writes plots (default: its runs/detect/valN)")
     args = ap.parse_args()
 
     if not args.ckpt.is_file():
@@ -43,17 +47,19 @@ def main():
     model = YOLO(str(args.ckpt))
 
     # --- Full test-set metrics ---
-    print(f"\nEvaluating {args.ckpt} on test split ...\n")
+    print(f"\nEvaluating {args.ckpt} on {args.split} split ...\n")
+    extra = {"project": str(args.project), "name": args.split} if args.project else {}
     metrics = model.val(
         data=str(args.data),
-        split="test",
+        split=args.split,
+        **extra,
         imgsz=args.imgsz,
         batch=16,
         device="mps",
         verbose=True,
     )
 
-    print("\n=== Test Set Results ===")
+    print(f"\n=== {args.split.capitalize()} Set Results ===")
     print(f"  mAP50      : {metrics.box.map50:.4f}")
     print(f"  mAP50-95   : {metrics.box.map:.4f}")
     print(f"  Precision   : {metrics.box.mp:.4f}")
