@@ -6,6 +6,10 @@
 KAGGLE      := ../.venv/bin/kaggle
 KAGGLE_USER := ssarvesh20000
 
+# --- v9 E1 / E2 (overnight2): v7 recipe + one data change each ---
+V9E1_KERNEL_SLUG := $(KAGGLE_USER)/damagedoctor-train-detect-v9-e1
+V9E2_KERNEL_SLUG := $(KAGGLE_USER)/damagedoctor-train-detect-v9-e2
+
 # --- v9 detect: v7 recipe + V9 DATA HOOK (prepared, not run yet) ---
 V9_KERNEL_SLUG  := $(KAGGLE_USER)/damagedoctor-train-detect-v9
 V9_KERNEL_DIR   := kernels/train_detect_v9
@@ -35,6 +39,7 @@ SEG_KERNEL_DIR   := kernels/train_seg_cardd
 SEG_OUTPUT_DIR   := ../runs/kaggle_cardd_v5_seg
 
 .PHONY: help check-cli \
+        push-v9e1 push-v9e2 v9e-status pull-v9e \
         push-v9 v9-status pull-v9 \
         push-v8 v8-status pull-v8 \
         push-v7 v7-status pull-v7 \
@@ -71,6 +76,22 @@ check-cli:
 		exit 1; \
 	}
 	@$(KAGGLE) kernels list --mine --page-size 1 >/dev/null && echo "OK: kaggle CLI authenticated"
+
+# --- v9 E1 / E2 ---
+push-v9e1: check-cli
+	$(KAGGLE) kernels push -p kernels/train_detect_v9_e1
+
+push-v9e2: check-cli
+	$(KAGGLE) kernels push -p kernels/train_detect_v9_e2
+
+v9e-status: check-cli
+	$(KAGGLE) kernels status $(V9E1_KERNEL_SLUG)
+	$(KAGGLE) kernels status $(V9E2_KERNEL_SLUG)
+
+pull-v9e: check-cli
+	@mkdir -p ../runs/kaggle_cardd_v9e1_detect ../runs/kaggle_cardd_v9e2_detect
+	$(KAGGLE) kernels output $(V9E1_KERNEL_SLUG) -p ../runs/kaggle_cardd_v9e1_detect
+	$(KAGGLE) kernels output $(V9E2_KERNEL_SLUG) -p ../runs/kaggle_cardd_v9e2_detect
 
 # --- v9 detect ---
 # Attaches the LATEST version of damagedoctor-cardd-yolo (v3 = 280 bg since v8!).

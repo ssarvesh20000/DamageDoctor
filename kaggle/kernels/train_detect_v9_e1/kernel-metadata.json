@@ -1,0 +1,17 @@
+{
+  "id": "ssarvesh20000/damagedoctor-train-detect-v9-e1",
+  "title": "DamageDoctor Train Detect v9 E1",
+  "code_file": "train.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "ssarvesh20000/damagedoctor-cardd-yolo",
+    "ssarvesh20000/damagedoctor-v9-e1-overlay"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}
